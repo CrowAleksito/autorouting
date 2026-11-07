@@ -338,7 +338,25 @@ export class MultilayerIjump extends GeneralizedAstarAutorouter {
       }
     }
 
-    const travelDirs2 = travelDirs1
+    const allDirsWithCollision = travelDirs1.map((dir) =>
+      obstacles.getOrthoDirectionCollisionInfo(node, dir, {
+        margin: this.OBSTACLE_MARGIN,
+      }),
+    )
+
+    const adjacentBlockedDir =
+      node.parent && !node.obstacleHit
+        ? allDirsWithCollision.find(
+            (d) =>
+              d.dl === 0 &&
+              d.obstacle &&
+              d.wallDistance <= this.OBSTACLE_MARGIN + 1e-6 &&
+              !(d.dx === forwardDir.dx && d.dy === forwardDir.dy) &&
+              !(d.dx === -forwardDir.dx && d.dy === -forwardDir.dy),
+          )
+        : undefined
+
+    const travelDirs2 = allDirsWithCollision
       .filter((dir) => {
         // If we have a parent, don't go backwards towards the parent
         if (
@@ -351,22 +369,12 @@ export class MultilayerIjump extends GeneralizedAstarAutorouter {
           dir.dx === forwardDir.dx &&
           dir.dy === forwardDir.dy &&
           dir.dl === forwardDir.dl &&
-          node.parent?.obstacleHit
+          node.parent?.obstacleHit &&
+          !adjacentBlockedDir
         ) {
           return false
         }
         return true
-      })
-      .map((dir) => {
-        const collisionInfo = obstacles.getOrthoDirectionCollisionInfo(
-          node,
-          dir,
-          {
-            margin: this.OBSTACLE_MARGIN,
-          },
-        )
-
-        return collisionInfo
       })
       // Filter out directions that are too close to the wall
       .filter((dir) => !(dir.wallDistance < this.OBSTACLE_MARGIN))
@@ -430,12 +438,19 @@ export class MultilayerIjump extends GeneralizedAstarAutorouter {
       }
 
       let overcomeDistance: number | null = null
-      if (node?.obstacleHit) {
+      const obsToOvercome = node?.obstacleHit ?? adjacentBlockedDir?.obstacle
+      if (obsToOvercome) {
+        const wallDir = node?.obstacleHit
+          ? { ...forwardDir, wallDistance: this.OBSTACLE_MARGIN }
+          : {
+              ...adjacentBlockedDir!,
+              wallDistance: adjacentBlockedDir!.wallDistance,
+            }
         overcomeDistance = getDistanceToOvercomeObstacle({
           node,
           travelDir,
-          wallDir: { ...forwardDir, wallDistance: this.OBSTACLE_MARGIN },
-          obstacle: node.obstacleHit,
+          wallDir,
+          obstacle: obsToOvercome,
           obstacles,
           OBSTACLE_MARGIN: this.OBSTACLE_MARGIN,
           SHOULD_DETECT_CONJOINED_OBSTACLES: true,
@@ -524,13 +539,15 @@ export class MultilayerIjump extends GeneralizedAstarAutorouter {
       }
     }
 
-    return travelDirs3.map((dir) => ({
-      x: node.x + dir.dx * dir.travelDistance,
-      y: node.y + dir.dy * dir.travelDistance,
-      l: node.l + dir.dl,
-      obstacleHit: dir.obstacle,
-      travelMarginCostFactor: dir.travelMarginCostFactor,
-      enterMarginCost: dir.enterMarginCost,
-    }))
+    return travelDirs3
+      .filter((dir) => dir.dl !== 0 || dir.travelDistance >= 1e-3)
+      .map((dir) => ({
+        x: node.x + dir.dx * dir.travelDistance,
+        y: node.y + dir.dy * dir.travelDistance,
+        l: node.l + dir.dl,
+        obstacleHit: dir.obstacle,
+        travelMarginCostFactor: dir.travelMarginCostFactor,
+        enterMarginCost: dir.enterMarginCost,
+      }))
   }
 }
